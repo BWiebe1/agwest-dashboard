@@ -1,93 +1,63 @@
+
 import streamlit as st
 import pandas as pd
-import streamlit.components.v1 as components
+import gspread
+from oauth2client.service_account import ServiceAccountCredentials
 
-# Sample contact data
-if "contacts" not in st.session_state:
-    st.session_state.contacts = pd.DataFrame([
-        {"Name": "Jordan Wipf", "Role": "Owner", "Company": "Tria Products", "Email": "jordan@triaproducts.com", "Phone": "+1 (204) 280-0483"},
-        {"Name": "Travis Gross", "Role": "Electrician", "Company": "", "Email": "Telectricalservicesltd@gmail.com", "Phone": "+1 (431) 866-2831"},
-        {"Name": "Eugene Gala", "Role": "Hydronic Engineer", "Company": "SIM Enterprises", "Email": "", "Phone": "204-803-8209"},
-    ])
+# Authenticate with Google Sheets using Streamlit secrets
+scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
+creds = ServiceAccountCredentials.from_json_keyfile_dict(st.secrets["gcp_service_account"], scope)
+client = gspread.authorize(creds)
 
-contacts = st.session_state.contacts
-subcontractors = contacts[contacts['Role'].str.lower().str.contains("electrician|engineer|contractor", na=False)]
+# Connect to the Google Sheet and worksheet
+sheet = client.open_by_key("1LUFKamENznSNzY7wXu6n1w2hHVy6q9TOvmM2EbtAULw")
+worksheet = sheet.worksheet("Contacts")
 
-tasks = pd.DataFrame([
-    {"Task": "Order security cameras", "Project": "AgWest", "Due": ""},
-    {"Task": "Apply for temporary hydro service", "Project": "AgWest Brandon", "Due": ""},
-    {"Task": "Update site plan", "Project": "AgWest Russell", "Due": ""},
-])
+# Load contacts into a DataFrame
+data = worksheet.get_all_records()
+df = pd.DataFrame(data)
 
-purchases = pd.DataFrame([
-    {"Item": "Eufy 4G LTE Cam S330", "Category": "Security Camera", "Supplier": "Amazon.ca", "Price": "$249.99 CAD"},
-    {"Item": "3-inch rebar chairs", "Category": "Concrete Accessory", "Supplier": "White Cap", "Price": "TBD"},
-])
+st.title("AgWest Contact Manager (Live Google Sheet)")
 
-st.title("AgWest Project Dashboard")
+# Add new contact
+st.markdown("### ➕ Add New Contact")
+with st.form("add_contact_form"):
+    name = st.text_input("Name")
+    role = st.text_input("Role")
+    company = st.text_input("Company")
+    email = st.text_input("Email")
+    phone = st.text_input("Phone")
+    submitted = st.form_submit_button("Add Contact")
+    if submitted:
+        new_contact = [name, role, company, email, phone]
+        worksheet.append_row(new_contact)
+        st.success("Contact added successfully. Please refresh to see the update.")
 
-st.markdown("### 📇 Contacts")
-if st.checkbox("Add New Contact"):
-    with st.form("add_contact_form"):
-        name = st.text_input("Name")
-        role = st.text_input("Role")
-        company = st.text_input("Company")
-        email = st.text_input("Email")
-        phone = st.text_input("Phone")
-        submitted = st.form_submit_button("Add Contact")
-        if submitted:
-            new_contact = {"Name": name, "Role": role, "Company": company, "Email": email, "Phone": phone}
-            st.session_state.contacts = pd.concat([st.session_state.contacts, pd.DataFrame([new_contact])], ignore_index=True)
-            st.success("Contact added successfully.")
+# Show current contacts
+st.markdown("### 📇 Current Contacts")
+st.dataframe(df)
 
-st.dataframe(st.session_state.contacts)
-
+# Edit/delete contact
 st.markdown("### ✏️ Edit or Delete Contact")
-if not contacts.empty:
-    contact_names = contacts["Name"].tolist()
+if not df.empty:
+    contact_names = df["Name"].tolist()
     selected_name = st.selectbox("Select contact to edit/delete", contact_names)
+    selected_index = df[df["Name"] == selected_name].index[0]
+    contact = df.loc[selected_index]
 
-    if selected_name:
-        contact_index = contacts[contacts["Name"] == selected_name].index[0]
-        contact_row = contacts.loc[contact_index]
+    with st.form("edit_contact_form"):
+        updated_name = st.text_input("Name", contact["Name"])
+        updated_role = st.text_input("Role", contact["Role"])
+        updated_company = st.text_input("Company", contact["Company"])
+        updated_email = st.text_input("Email", contact["Email"])
+        updated_phone = st.text_input("Phone", contact["Phone"])
+        update = st.form_submit_button("Update Contact")
+        delete = st.form_submit_button("Delete Contact")
 
-        with st.form("edit_contact_form"):
-            updated_name = st.text_input("Name", contact_row["Name"])
-            updated_role = st.text_input("Role", contact_row["Role"])
-            updated_company = st.text_input("Company", contact_row["Company"])
-            updated_email = st.text_input("Email", contact_row["Email"])
-            updated_phone = st.text_input("Phone", contact_row["Phone"])
+        if update:
+            worksheet.update(f"A{selected_index+2}", [[updated_name, updated_role, updated_company, updated_email, updated_phone]])
+            st.success("Contact updated. Please refresh to see changes.")
 
-            update = st.form_submit_button("Update Contact")
-            delete = st.form_submit_button("Delete Contact")
-
-            if update:
-                st.session_state.contacts.loc[contact_index] = {
-                    "Name": updated_name,
-                    "Role": updated_role,
-                    "Company": updated_company,
-                    "Email": updated_email,
-                    "Phone": updated_phone
-                }
-                st.success("Contact updated.")
-
-            if delete:
-                st.session_state.contacts = st.session_state.contacts.drop(contact_index).reset_index(drop=True)
-                st.success("Contact deleted.")
-
-st.markdown("### 🧱 Subcontractors")
-subcontractors = st.session_state.contacts[st.session_state.contacts['Role'].str.lower().str.contains("electrician|engineer|contractor", na=False)]
-st.dataframe(subcontractors)
-
-st.markdown("### 📋 Tasks")
-st.dataframe(tasks)
-
-st.markdown("### 🛒 Potential Purchases")
-st.dataframe(purchases)
-
-st.markdown("### 🌦️ Weather")
-st.markdown("[🌤 Brandon Weather Forecast](https://forecast7.com/en/49d85n99d95/brandon/)")
-st.markdown("[🌤 Russell Weather Forecast](https://forecast7.com/en/50d77n101d29/russell/)")
-
-st.sidebar.title("Project Summary")
-st.sidebar.info("Manage contacts, tasks, and procurement across AgWest sites.")
+        if delete:
+            worksheet.delete_rows(selected_index + 2)
+            st.success("Contact deleted. Please refresh to update the table.")
